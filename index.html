@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulateur de Notes - UV Physique 3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        canvas { touch-action: none; /* Empêche le scroll pendant qu'on touche le canvas */ }
+    </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen p-4 md:p-6 flex justify-center items-start font-sans">
+
+    <div class="max-w-7xl w-full flex flex-col xl:flex-row gap-6">
+        
+        <!-- PANNEAU GAUCHE : CONFIGURATION -->
+        <div class="w-full xl:w-[400px] flex-shrink-0 flex flex-col gap-6">
+            
+            <!-- Réglages globaux -->
+            <div class="bg-slate-800 rounded-2xl p-5 shadow-xl border border-slate-700">
+                <h2 class="text-lg font-bold text-blue-400 mb-4">Objectifs Globaux</h2>
+                <div class="flex gap-4">
+                    <div class="flex-1">
+                        <label class="block text-xs text-slate-400 uppercase mb-1">Moyenne visée</label>
+                        <input type="number" id="targetAvg" step="0.1" value="9.5" class="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold" onchange="triggerUpdate()">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-xs text-slate-400 uppercase mb-1">Note minimale</label>
+                        <input type="number" id="floorGrade" step="0.1" value="7.0" class="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold" onchange="triggerUpdate()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ajout & Liste des matières -->
+            <div class="bg-slate-800 rounded-2xl p-5 shadow-xl border border-slate-700 flex-grow flex flex-col">
+                <h2 class="text-lg font-bold text-blue-400 mb-2">Mes Matières</h2>
+                <p class="text-xs text-slate-400 mb-4">Ajoute tes notes avant rattrapage. Celles &ge; 10 seront automatiquement verrouillées.</p>
+                
+                <form id="addSubjectForm" class="flex flex-col gap-3 mb-6 bg-slate-750 p-3 rounded-lg border border-slate-600/50 bg-slate-900/30">
+                    <input type="text" id="subjName" required placeholder="Nom de la matière" class="bg-slate-700 border border-slate-600 rounded p-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                    <div class="flex gap-3">
+                        <input type="number" id="subjGrade" required step="0.01" min="0" max="20" placeholder="Note init. /20" class="w-1/2 bg-slate-700 border border-slate-600 rounded p-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                        <input type="number" id="subjCoeff" required step="0.01" min="0.1" placeholder="Coeff (ex: 2.5)" class="w-1/2 bg-slate-700 border border-slate-600 rounded p-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-medium rounded p-2 text-sm transition-colors mt-1">
+                        + Ajouter cette matière
+                    </button>
+                </form>
+
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Matières enregistrées</div>
+                <div id="subjectList" class="flex flex-col gap-2 overflow-y-auto flex-grow max-h-[300px] xl:max-h-none pr-1 custom-scrollbar">
+                    <!-- Rempli par le JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- PANNEAU DROITE : SIMULATION & STATS -->
+        <div class="flex-grow flex flex-col gap-6 w-full min-w-0">
+            
+            <!-- En-tête statut rapide -->
+            <div class="bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div>
+                    <h1 class="text-2xl font-bold text-white">Simulateur Interactif</h1>
+                    <p class="text-slate-400 text-sm mt-1">Glisse les barres non verrouillées pour simuler tes notes de rattrapage.</p>
+                </div>
+                <div id="statusBox" class="px-6 py-3 rounded-xl bg-slate-700 border border-slate-600 text-center min-w-[200px] transition-colors duration-300">
+                    <div class="text-sm font-semibold text-slate-300 uppercase">Moyenne Simulée</div>
+                    <div class="text-3xl font-bold mt-1" id="currentAvgDisplay">--</div>
+                </div>
+            </div>
+
+            <!-- Canvas Area -->
+            <div class="flex-grow min-h-[400px] bg-slate-800 rounded-2xl p-4 shadow-xl border border-slate-700 relative flex flex-col">
+                <div id="canvasContainer" class="flex-grow w-full relative">
+                    <canvas id="gradeCanvas" class="absolute inset-0 w-full h-full rounded-lg shadow-inner cursor-pointer select-none bg-slate-900"></canvas>
+                </div>
+                <button onclick="resetSimulation()" class="mt-4 w-full sm:w-auto self-end py-2 px-6 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white rounded-lg transition-colors font-medium text-sm">
+                    ↻ Réinitialiser aux notes initiales
+                </button>
+            </div>
+
+            <!-- Tableau détaillé et messages -->
+            <div class="bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-700">
+                <div id="statusMessage" class="mb-4 text-base font-medium text-slate-300 p-3 bg-slate-900 rounded-lg border border-slate-700">
+                    En attente de données...
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left text-slate-400">
+                        <thead class="text-xs uppercase bg-slate-700/50 text-slate-300">
+                            <tr>
+                                <th class="px-3 py-2">Matière</th>
+                                <th class="px-3 py-2 text-center">Statut</th>
+                                <th class="px-3 py-2 text-right">Coef</th>
+                                <th class="px-3 py-2 text-right">Note Initiale</th>
+                                <th class="px-3 py-2 text-right text-white">Note Simulée</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detailsTable" class="divide-y divide-slate-700">
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+<style>
+    /* Custom scrollbar for the subjects list */
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
+</style>
+
+<script>
+    // --- STATE MANAGEMENT ---
+    // Exemple par défaut (celui de l'image) pour ne pas arriver sur une page vide
+    let subjects = [
+        { id: 1, name: "Atomistique", initialGrade: 11.20, grade: 11.20, coeff: 2.50, locked: true },
+        { id: 2, name: "Electronique", initialGrade: 9.25, grade: 9.25, coeff: 3.50, locked: false },
+        { id: 3, name: "Electrostatique", initialGrade: 7.00, grade: 7.00, coeff: 2.50, locked: false },
+        { id: 4, name: "Thermodynamique", initialGrade: 4.00, grade: 4.00, coeff: 2.50, locked: false }
+    ];
+    let nextId = 5;
+
+    // --- DOM ELEMENTS ---
+    const targetInput = document.getElementById('targetAvg');
+    const floorInput = document.getElementById('floorGrade');
+    const form = document.getElementById('addSubjectForm');
+    const subjectListEl = document.getElementById('subjectList');
+    
+    const canvas = document.getElementById('gradeCanvas');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const ctx = canvas.getContext('2d');
+    
+    const currentAvgDisplay = document.getElementById('currentAvgDisplay');
+    const statusBox = document.getElementById('statusBox');
+    const statusMessage = document.getElementById('statusMessage');
+    const detailsTable = document.getElementById('detailsTable');
+
+    // --- SETTINGS ---
+    function getTarget() { return parseFloat(targetInput.value) || 9.5; }
+    function getFloor() { return parseFloat(floorInput.value) || 7.0; }
+
+    let width, height;
+    let draggingSubjectIndex = -1;
+    const padding = { top: 40, right: 30, bottom: 60, left: 50 };
+    const barWidthRatio = 0.5;
+
+    // --- FORM LOGIC ---
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('subjName').value.trim();
+        const grade = parseFloat(document.getElementById('subjGrade').value);
+        const coeff = parseFloat(document.getElementById('subjCoeff').value);
+
+        if (!name || isNaN(grade) || isNaN(coeff)) return;
+
+        // Règle: Si note initiale >= 10, pas de rattrapage (verrouillé)
+        const locked = grade >= 10;
+
+        subjects.push({
+            id: nextId++,
+            name,
+            initialGrade: grade,
+            grade: grade, // La note simulée démarre à la note initiale
+            coeff,
+            locked
+        });
+
+        form.reset();
+        document.getElementById('subjName').focus();
+        
+        triggerUpdate();
+    });
+
+    function deleteSubject(id) {
+        subjects = subjects.filter(s => s.id !== id);
+        triggerUpdate();
+    }
+
+    function renderSubjectList() {
+        if (subjects.length === 0) {
+            subjectListEl.innerHTML = '<div class="text-sm text-slate-500 text-center py-4 italic">Aucune matière enregistrée.</div>';
+            return;
+        }
+
+        subjectListEl.innerHTML = subjects.map(s => `
+            <div class="flex justify-between items-center bg-slate-700/40 hover:bg-slate-700/80 transition-colors p-3 rounded-lg border border-slate-600">
+                <div class="overflow-hidden pr-2">
+                    <div class="font-bold text-sm text-slate-200 truncate" title="${s.name}">${s.name}</div>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="text-xs bg-slate-800 px-2 py-0.5 rounded text-slate-400">Coef: ${s.coeff}</span>
+                        <span class="text-xs ${s.locked ? 'text-emerald-400' : 'text-orange-400'}">
+                            Note: ${s.initialGrade} ${s.locked ? '🔒' : '✏️'}
+                        </span>
+                    </div>
+                </div>
+                <button onclick="deleteSubject(${s.id})" class="text-slate-500 hover:text-red-400 hover:bg-red-400/10 p-2 rounded-md transition-colors" title="Supprimer">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+            </div>
+        `).join('');
+    }
+
+    // --- CORE LOGIC ---
+    function triggerUpdate() {
+        renderSubjectList();
+        updateUI();
+        draw();
+    }
+
+    function resetSimulation() {
+        subjects.forEach(s => s.grade = s.initialGrade);
+        triggerUpdate();
+    }
+
+    function calculateStats() {
+        let totalPoints = 0;
+        let totalCoeff = 0;
+        let minGrade = 20;
+
+        subjects.forEach(s => {
+            totalPoints += s.grade * s.coeff;
+            totalCoeff += s.coeff;
+            if (s.grade < minGrade) minGrade = s.grade;
+        });
+
+        const average = totalCoeff > 0 ? totalPoints / totalCoeff : 0;
+        return { average, minGrade: subjects.length > 0 ? minGrade : 0, totalCoeff };
+    }
+
+    // --- UI UPDATES ---
+    function updateUI() {
+        const stats = calculateStats();
+        const target = getTarget();
+        const floor = getFloor();
+        
+        if (subjects.length === 0) {
+            currentAvgDisplay.textContent = "--";
+            statusBox.className = "px-6 py-3 rounded-xl bg-slate-700 border border-slate-600 text-center transition-colors";
+            currentAvgDisplay.className = "text-3xl font-bold mt-1 text-slate-500";
+            statusMessage.innerHTML = "Ajoutez des matières dans le panneau de gauche pour commencer la simulation.";
+            detailsTable.innerHTML = "";
+            return;
+        }
+
+        currentAvgDisplay.textContent = stats.average.toFixed(2);
+
+        const isAvgOk = stats.average >= target;
+        const isFloorOk = stats.minGrade >= floor;
+        const isSuccess = isAvgOk && isFloorOk;
+
+        if (isSuccess) {
+            statusBox.className = "px-6 py-3 rounded-xl bg-emerald-900/40 border border-emerald-500/50 text-center transition-colors";
+            statusMessage.innerHTML = "✅ <span class='text-emerald-400 font-bold'>Objectifs atteints !</span> Ta moyenne et tes notes minimales sont validées.";
+            currentAvgDisplay.className = "text-3xl font-bold mt-1 text-emerald-400";
+        } else {
+            statusBox.className = "px-6 py-3 rounded-xl bg-slate-700 border border-slate-600 text-center transition-colors";
+            currentAvgDisplay.className = "text-3xl font-bold mt-1 text-white";
+            
+            if (!isFloorOk) {
+                statusMessage.innerHTML = `⚠️ <span class='text-red-400'>Attention : Une note est inférieure au minimum requis (${floor}).</span>`;
+            } else {
+                const pointsNeeded = (target * stats.totalCoeff) - (stats.average * stats.totalCoeff);
+                statusMessage.innerHTML = `🎯 Il manque <span class='text-blue-400 font-bold'>${pointsNeeded.toFixed(2)} points pondérés</span> pour atteindre la moyenne de ${target}.`;
+            }
+        }
+
+        detailsTable.innerHTML = subjects.map(s => {
+            const gradeChanged = s.grade !== s.initialGrade;
+            return `
+            <tr class="${s.locked ? 'bg-slate-800/50 opacity-70' : 'hover:bg-slate-700/30'} transition-colors">
+                <td class="px-3 py-3 font-medium truncate max-w-[150px]" title="${s.name}">${s.name}</td>
+                <td class="px-3 py-3 text-center text-xs">
+                    ${s.locked ? '<span class="bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded">Validé</span>' : '<span class="bg-orange-500/20 text-orange-400 px-2 py-1 rounded">Rattrapage</span>'}
+                </td>
+                <td class="px-3 py-3 text-right text-slate-400">${s.coeff}</td>
+                <td class="px-3 py-3 text-right text-slate-500">${s.initialGrade.toFixed(2)}</td>
+                <td class="px-3 py-3 text-right font-mono font-bold ${gradeChanged ? 'text-blue-400' : (s.grade < floor ? 'text-red-400' : 'text-emerald-400')}">
+                    ${s.grade.toFixed(2)}
+                </td>
+            </tr>
+        `}).join('');
+    }
+
+    // --- CANVAS DRAWING ---
+    function resize() {
+        const rect = canvasContainer.getBoundingClientRect();
+        canvas.width = rect.width * 2; 
+        canvas.height = rect.height * 2;
+        
+        width = canvas.width;
+        height = canvas.height;
+        ctx.scale(2, 2);
+        width /= 2;
+        height /= 2;
+        
+        draw();
+    }
+
+    window.addEventListener('resize', resize);
+
+    function draw() {
+        ctx.clearRect(0, 0, width, height);
+
+        if (subjects.length === 0) {
+            ctx.fillStyle = '#64748b';
+            ctx.textAlign = 'center';
+            ctx.font = '14px Inter';
+            ctx.fillText("Aucune matière à afficher. Ajoutez-en une !", width/2, height/2);
+            return;
+        }
+
+        const stats = calculateStats();
+        const target = getTarget();
+        const floor = getFloor();
+
+        const chartWidth = width - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+        const getY = (grade) => padding.top + chartHeight - (grade / 20) * chartHeight;
+
+        // Grille & Axe Y
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1;
+        ctx.font = '11px Inter';
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'right';
+
+        [0, 5, 10, 15, 20].forEach(val => {
+            const y = getY(val);
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+            ctx.fillText(val, padding.left - 10, y + 4);
+        });
+
+        // Lignes d'objectifs
+        const drawLine = (val, color, dash, label) => {
+            const y = getY(val);
+            if(y < padding.top || y > height - padding.bottom) return; // Hors zone
+            
+            ctx.strokeStyle = color;
+            ctx.setLineDash(dash);
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = color;
+            ctx.fillText(label + " " + val, width - padding.right, y - 6);
+        };
+
+        drawLine(target, '#34d399', [5, 5], "Obj.");
+        drawLine(floor, '#f87171', [], "Min.");
+
+        // Calcul des largeurs de barres
+        const totalBars = subjects.length + 1; 
+        const spacing = chartWidth / totalBars;
+        // Limiter la largeur de la barre si on a très peu de matières
+        const barWidth = Math.min(spacing * barWidthRatio, 60); 
+
+        // Dessin des barres Matières
+        subjects.forEach((s, i) => {
+            const x = padding.left + (spacing * i) + (spacing - barWidth) / 2;
+            const y = getY(s.grade);
+            const barBottom = padding.top + chartHeight;
+
+            let color = '#3b82f6'; // Bleu modifiable
+            if (s.locked) color = '#475569'; // Verrouillé
+            else if (s.grade < floor) color = '#ef4444'; // Danger
+            else if (s.grade >= target) color = '#10b981'; // Bon
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(x, y, barWidth, barBottom - y, [6, 6, 0, 0]);
+            ctx.fill();
+
+            // Indicateur visuel pour les barres manipulables
+            if (!s.locked) {
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(x + barWidth/2, y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // Petit cadenas pour les verrouillés
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText("🔒", x + barWidth/2, y + 15);
+            }
+
+            // Textes sous la barre
+            ctx.fillStyle = '#cbd5e1';
+            ctx.textAlign = 'center';
+            let displayName = s.name.length > 8 ? s.name.substring(0, 6) + '..' : s.name;
+            ctx.fillText(displayName, x + barWidth/2, barBottom + 18);
+            
+            // Note au dessus
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 13px Inter';
+            ctx.fillText(s.grade.toFixed(1), x + barWidth/2, y - 10);
+            ctx.font = '11px Inter'; 
+
+            // Sauvegarde pour l'interaction
+            s.renderX = x;
+            s.renderW = barWidth;
+        });
+
+        // Barre de Moyenne (Dernière)
+        const avgX = padding.left + (spacing * subjects.length) + (spacing - barWidth) / 2;
+        const avgY = getY(stats.average);
+        const avgBottom = padding.top + chartHeight;
+        
+        const isSuccess = stats.average >= target && stats.minGrade >= floor;
+        
+        // Couleur de moyenne avec dégradé ou solide
+        ctx.fillStyle = isSuccess ? '#10b981' : (stats.minGrade < floor ? '#ef4444' : '#f59e0b');
+        ctx.beginPath();
+        ctx.roundRect(avgX, avgY, barWidth, avgBottom - avgY, [6, 6, 0, 0]);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 12px Inter';
+        ctx.fillText("MOYENNE", avgX + barWidth/2, avgBottom + 18);
+        ctx.font = 'bold 14px Inter';
+        ctx.fillText(stats.average.toFixed(2), avgX + barWidth/2, avgY - 10);
+    }
+
+    // --- INTERACTIONS CANVAS ---
+    function getGradeFromY(y) {
+        const chartHeight = height - padding.top - padding.bottom;
+        const relativeY = y - padding.top;
+        let grade = 20 - (relativeY / chartHeight * 20);
+        return Math.max(0, Math.min(20, grade));
+    }
+
+    function handleStart(e) {
+        if (subjects.length === 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+
+        subjects.forEach((s, i) => {
+            if (s.locked) return;
+            // Hitbox élargie pour faciliter le clic/touch
+            if (x >= s.renderX - 15 && x <= s.renderX + s.renderW + 15) {
+                draggingSubjectIndex = i;
+                s.grade = getGradeFromY(y);
+                updateUI();
+                draw();
+            }
+        });
+    }
+
+    function handleMove(e) {
+        if (draggingSubjectIndex === -1) return;
+        e.preventDefault(); 
+        const rect = canvas.getBoundingClientRect();
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const y = clientY - rect.top;
+
+        subjects[draggingSubjectIndex].grade = getGradeFromY(y);
+        updateUI();
+        draw();
+    }
+
+    function handleEnd() { draggingSubjectIndex = -1; }
+
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+
+    // --- INITIALISATION ---
+    setTimeout(() => {
+        resize();
+        triggerUpdate();
+    }, 50); // Léger délai pour s'assurer que le DOM est rendu
+
+</script>
+</body>
+</html>
